@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Smart Market Watchlist</title>
+<link rel="stylesheet" href="style.css" />
+<script>
+  // Applied before first paint so there's no flash of the wrong theme.
+  (function () {
+    var saved = localStorage.getItem("smartwatch-theme");
+    var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
+</head>
+<body>
+
+  <div class="theme-toggle" role="group" aria-label="Theme">
+    <button type="button" id="theme-light-btn" class="theme-toggle-btn" title="Light theme" aria-label="Light theme">☀ Light</button>
+    <button type="button" id="theme-dark-btn" class="theme-toggle-btn" title="Dark theme" aria-label="Dark theme">☾ Dark</button>
+  </div>
+
+  <div id="auth-view" class="auth-view">
+    <div class="auth-card">
+      <div class="brand auth-brand">
+        <span class="brand-mark">&#9670;</span>
+        <span>SmartWatch</span>
+      </div>
+      <p class="auth-subtitle">Track your portfolio and watchlist in one place.</p>
+
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" data-mode="login">Log in</button>
+        <button type="button" class="auth-tab" data-mode="register">Sign up</button>
+      </div>
+
+      <form id="auth-form">
+        <input id="auth-username" type="text" placeholder="Username" autocomplete="username" maxlength="20" />
+        <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password" maxlength="100" />
+        <button type="submit" id="auth-submit">Log in</button>
+      </form>
+      <p id="auth-error" class="error-banner" hidden></p>
+    </div>
+  </div>
+
+  <div id="app-view" class="app-view" hidden>
+    <nav class="topnav">
+      <div class="brand">
+        <span class="brand-mark">&#9670;</span>
+        <span>SmartWatch</span>
+      </div>
+      <div class="exchange-tabs">
+        <button type="button" class="exchange-tab" data-market="IN">&#127470;&#127475; Indian Exchange</button>
+        <button type="button" class="exchange-tab active" data-market="US">&#127482;&#127480; US Exchange</button>
+      </div>
+      <div class="nav-tabs">
+        <button type="button" class="nav-tab active" data-view="portfolio">Portfolio</button>
+        <button type="button" class="nav-tab" data-view="watchlist">Watchlist</button>
+      </div>
+      <div class="nav-meta">
+        <span id="market-status" class="market-status">checking...</span>
+        <span id="clock" class="clock"></span>
+        <span id="username-display" class="username-display"></span>
+        <button type="button" id="logout-btn" class="logout-btn">Log out</button>
+      </div>
+    </nav>
+
+    <main>
+      <!-- Portfolio view -->
+      <section id="portfolio-view" class="view">
+        <section class="stats-bar" id="portfolio-stats-bar"></section>
+
+        <form id="holding-form" class="add-form holding-form">
+          <input id="holding-symbol" type="text" placeholder="Ticker, e.g. AAPL or RELIANCE.NS" autocomplete="off" maxlength="20" />
+          <input id="holding-qty" type="number" placeholder="Quantity" min="0" step="any" />
+          <input id="holding-price" type="number" placeholder="Avg buy price" min="0" step="any" />
+          <button type="submit">Add holding</button>
+        </form>
+        <button type="button" id="export-csv-btn" class="secondary-btn">Export CSV</button>
+        <p id="portfolio-error" class="error-banner" hidden></p>
+
+        <section id="portfolio-empty-state" class="empty-state" hidden>
+          <p>No holdings yet. Add one above to build your portfolio.</p>
+        </section>
+
+        <div class="portfolio-charts">
+          <section id="allocation-section" class="allocation-section" hidden>
+            <h2 class="group-title"><span class="group-dot rec"></span>Portfolio Allocation</h2>
+            <div class="allocation-body">
+              <canvas id="allocation-chart" width="220" height="220"></canvas>
+              <div class="allocation-legend" id="allocation-legend"></div>
+            </div>
+          </section>
+
+          <section id="pnl-section" class="allocation-section pnl-section" hidden>
+            <h2 class="group-title"><span class="group-dot rec"></span>Profit &amp; Loss by Holding</h2>
+            <div class="pnl-body">
+              <div class="pnl-summary" id="pnl-summary"></div>
+              <canvas id="pnl-chart"></canvas>
+            </div>
+          </section>
+        </div>
+
+        <div class="card-grid" id="portfolio-holdings"></div>
+      </section>
+
+      <!-- Watchlist view -->
+      <section id="watchlist-view" class="view" hidden>
+        <section class="stats-bar" id="stats-bar"></section>
+
+        <form id="add-form" class="add-form">
+          <input id="symbol-input" type="text" placeholder="Add a ticker, e.g. AAPL or RELIANCE.NS" autocomplete="off" maxlength="20" />
+          <button type="submit">Add</button>
+        </form>
+        <p id="error-banner" class="error-banner" hidden></p>
+
+        <div class="sensitivity-control">
+          <label for="sensitivity-select">What counts as "meaningful"?</label>
+          <select id="sensitivity-select">
+            <option value="conservative">Conservative - only big moves</option>
+            <option value="balanced">Balanced</option>
+            <option value="aggressive">Aggressive - catch small moves too</option>
+          </select>
+        </div>
+
+        <section id="empty-state" class="empty-state" hidden>
+          <p id="empty-state-text">Your watchlist is empty. Add a symbol above to get started.</p>
+        </section>
+
+        <div id="groups"></div>
+
+        <section id="recommendations" class="recommendations" hidden>
+          <h2 class="group-title"><span class="group-dot rec"></span>Recommended for you</h2>
+          <div class="card-grid" id="recommendations-grid"></div>
+        </section>
+      </section>
+    </main>
+
+    <footer>
+      <span id="status-line"></span>
+    </footer>
+  </div>
+
+  <div id="detail-modal" class="modal" hidden>
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal-content">
+      <button id="modal-close" class="modal-close" aria-label="Close">&times;</button>
+      <div class="modal-header">
+        <h2 id="modal-symbol"></h2>
+        <span id="modal-level-badge" class="level-badge"></span>
+      </div>
+      <div id="modal-price-row" class="modal-price-row"></div>
+      <canvas id="modal-chart" width="640" height="180" class="modal-chart"></canvas>
+      <div id="breakdown-section">
+        <h3 class="analysis-title">Why this score</h3>
+        <div class="breakdown-bars" id="breakdown-bars"></div>
+      </div>
+      <h3 class="analysis-title">Details</h3>
+      <div class="modal-stats" id="modal-stats"></div>
+    </div>
+  </div>
+
+  <script src="app.js?v=13"></script>
+</body>
+</html>

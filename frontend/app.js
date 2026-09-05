@@ -409,7 +409,6 @@ function updateMarketStatus(items) {
     els.marketStatus.textContent = "live data";
     els.marketStatus.className = "market-status ok";
   } else {
-    els.marketStatus.textContent = "degraded - showing cached/simulated data";
     els.marketStatus.className = "market-status degraded";
   }
 }

@@ -3,115 +3,81 @@ from __future__ import annotations
 import hashlib
 import math
 import time
-from typing import Optional
 
-from ..models import Quote
+from .base import MarketDataProvider, RawQuote
+
+# Approximate real-world reference prices for common tickers so the simulated
+# fallback still looks plausible in a demo (e.g. SIRI shouldn't jump to $400
+# just because Yahoo Finance is rate-limited). Unknown symbols fall back to a
+# hash-derived price so any ticker still works, just without this realism.
+KNOWN_BASE_PRICES: dict[str, float] = {
+    # US - high price range
+    "BKNG": 4200, "AVGO": 1700, "COST": 900, "NFLX": 700, "MSFT": 420,
+    # US - medium price range
+    "AAPL": 230, "TSLA": 260, "GOOGL": 175, "AMZN": 190, "NVDA": 140,
+    "META": 560, "AMD": 160, "UBER": 75, "DIS": 110, "PYPL": 70, "ROKU": 75,
+    # US - low price range
+    "SNAP": 11, "PINS": 33, "ETSY": 60, "F": 11, "SIRI": 4, "PLUG": 2.5,
+    "NOK": 4, "T": 20, "BAC": 40, "INTC": 22,
+    # India (NSE, .NS suffix) - high price range (INR)
+    "MRF.NS": 128000, "PAGEIND.NS": 42000, "SHREECEM.NS": 27000,
+    "BAJFINANCE.NS": 7200, "MARUTI.NS": 12500, "TCS.NS": 4200,
+    # India - medium price range (INR)
+    "RELIANCE.NS": 2900, "HINDUNILVR.NS": 2700, "ADANIENT.NS": 2900,
+    "KOTAKBANK.NS": 1750, "SUNPHARMA.NS": 1750, "HDFCBANK.NS": 1650,
+    "LT.NS": 3600, "INFY.NS": 1900, "AXISBANK.NS": 1150,
+    # India - low price range (INR)
+    "ICICIBANK.NS": 1250, "TATAMOTORS.NS": 950, "SBIN.NS": 820,
+    "WIPRO.NS": 550, "ITC.NS": 470, "NTPC.NS": 370, "COALINDIA.NS": 410,
+    "ONGC.NS": 260, "IDEA.NS": 15, "YESBANK.NS": 22,
+}
 
 
-class SimulatedProvider:
-    """
-    Deterministic fallback provider.
+class SimulatedProvider(MarketDataProvider):
+    """Deterministic synthetic data used when the real provider is
+    unreachable (or for demoing without network). Deterministic per-symbol
+    seeding means repeated calls in the same minute give a coherent walk
+    instead of pure noise, so the UI still looks plausible while degraded."""
 
-    Used only when the live market-data provider is unavailable.
+    name = "simulated"
 
-    The values are deterministic for a symbol, so refreshing the page does
-    not create completely random and unrealistic jumps.
-    """
+    def _seed(self, symbol: str) -> float:
+        digest = hashlib.sha256(symbol.encode()).hexdigest()
+        return int(digest[:8], 16) / 0xFFFFFFFF
 
-    def __init__(self) -> None:
-        self._base_prices: dict[str, float] = {}
+    def get_quote(self, symbol: str) -> RawQuote:
+        seed = self._seed(symbol)
+        if symbol in KNOWN_BASE_PRICES:
+            base_price = KNOWN_BASE_PRICES[symbol]
+        else:
+            base_price = 50 + seed * 950  # spread unknown symbols across a wide price range
 
-    def get_quote(self, symbol: str) -> Optional[Quote]:
-        symbol = symbol.strip().upper()
+        minute_bucket = int(time.time() // 60)
+        wobble = math.sin(minute_bucket + seed * 100) * 0.02
+        price = base_price * (1 + wobble)
+        prev_close = base_price * (1 + math.sin(minute_bucket - 1 + seed * 100) * 0.02)
+        avg_volume = 500_000 + seed * 2_000_000
+        volume = avg_volume * (0.5 + abs(math.sin(minute_bucket * seed + 1)) * 1.5)
+        # 52-week/day ranges and moving averages are synthesized as plausible
+        # spreads around the base price - not real history, but consistent
+        # and stable per-symbol so the analysis view looks coherent, not random.
+        year_high = base_price * (1.15 + seed * 0.2)
+        year_low = base_price * (0.65 + seed * 0.15)
+        day_high = price * 1.012
+        day_low = price * 0.988
+        fifty_day_avg = base_price * (0.97 + seed * 0.04)
+        two_hundred_day_avg = base_price * (0.92 + seed * 0.08)
 
-        if not symbol:
-            return None
-
-        base_price = self._get_base_price(symbol)
-
-        # Use the current time in 20-second buckets.
-        # This gives a small movement as the poller refreshes.
-        bucket = int(time.time() // 20)
-
-        digest = hashlib.sha256(
-            f"{symbol}:{bucket}".encode()
-        ).hexdigest()
-
-        raw = int(digest[:8], 16)
-
-        # Deterministic movement between roughly -1.2% and +1.2%.
-        movement = ((raw % 2401) - 1200) / 1000
-
-        price = base_price * (1 + movement / 100)
-
-        # Keep the simulated previous close stable around the base price.
-        prev_close = base_price
-
-        pct_change = (
-            ((price - prev_close) / prev_close) * 100
-            if prev_close
-            else 0.0
-        )
-
-        # Generate a deterministic pseudo-volume.
-        volume = 100_000 + (raw % 900_000)
-        avg_volume = 500_000
-
-        # Simulated history for the frontend sparkline.
-        history = []
-
-        for i in range(8):
-            h_digest = hashlib.sha256(
-                f"{symbol}:history:{bucket - i}".encode()
-            ).hexdigest()
-
-            h_raw = int(h_digest[:8], 16)
-
-            h_move = ((h_raw % 1601) - 800) / 1000
-
-            history.append(
-                base_price * (1 + h_move / 100)
-            )
-
-        history.reverse()
-
-        currency = "INR" if symbol.endswith(".NS") else "USD"
-
-        return Quote(
+        return RawQuote(
             symbol=symbol,
             price=round(price, 2),
             prev_close=round(prev_close, 2),
-            volume=float(volume),
-            avg_volume=float(avg_volume),
-            pct_change=round(pct_change, 3),
-            as_of=time.time(),
-            source="simulated",
-            stale=True,
-            currency=currency,
-            history=[round(x, 2) for x in history],
-            day_low=round(price * 0.985, 2),
-            day_high=round(price * 1.015, 2),
-            year_low=round(price * 0.70, 2),
-            year_high=round(price * 1.30, 2),
-            fifty_day_avg=round(base_price, 2),
-            two_hundred_day_avg=round(base_price, 2),
+            volume=round(volume),
+            avg_volume=round(avg_volume),
+            day_low=round(day_low, 2),
+            day_high=round(day_high, 2),
+            year_low=round(year_low, 2),
+            year_high=round(year_high, 2),
+            fifty_day_avg=round(fifty_day_avg, 2),
+            two_hundred_day_avg=round(two_hundred_day_avg, 2),
         )
-
-    def _get_base_price(self, symbol: str) -> float:
-        if symbol in self._base_prices:
-            return self._base_prices[symbol]
-
-        # Stable base price generated from the symbol.
-        digest = hashlib.sha256(symbol.encode()).hexdigest()
-        number = int(digest[:10], 16)
-
-        if symbol.endswith(".NS"):
-            # INR-style simulated range.
-            base = 100 + (number % 4900)
-        else:
-            # USD-style simulated range.
-            base = 20 + (number % 980)
-
-        self._base_prices[symbol] = float(base)
-
-        return float(base)
